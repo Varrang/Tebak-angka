@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Guess The Card — Menu & Haptics</title>
+<style>
+  :root{
+    --card-w: 120px;
+    --card-h: 160px;
+    --gap: 18px;
+    --expose-ms: 1200;
+    --shuffle-steps: 6;
+    --shuffle-ms: 420;
+    --btn-padding: 10px 16px;
+  }
+  @media (max-width:480px){
+    :root{
+      --card-w: 96px; --card-h: 140px; --gap:12px; --shuffle-steps:5; --shuffle-ms:380; --expose-ms:1000;
+    }
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent}
+  body{ margin:0; min-height:100vh; display:grid; place-items:center; background:linear-gradient(120deg,#0f2027,#203a43,#03fbff); color:#fff; font-family:system-ui,Arial,sans-serif; padding:18px;}
+  .container{ width: calc(var(--card-w) * 3 + var(--gap) * 2); max-width:96vw; text-align:center;}
+  h1{ margin:0 0 10px; font-size:20px; }
+  .center { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; align-items:center; }
+  .btn{ background:#09dab1; color:#000000; border:0; padding:12px 18px; border-radius:12px; font-weight:800; cursor:pointer; min-width:92px; }
+  .btn:disabled{ opacity:0.6; cursor:not-allowed; }
+  .menu{ display:flex; flex-direction:column; gap:12px; margin-top:12px; align-items:center;}
+  .screen{ display:none; }
+  .screen.active{ display:block; }
+  .stats{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-bottom:8px; }
+  .stat-item{ background: rgba(214, 159, 159, 0.06); padding:6px 10px; border-radius:8px; font-weight:700; font-size:13px; }
+  .table{ position:relative; height:var(--card-h); width:100%; margin:10px auto 14px; user-select:none; touch-action:manipulation; }
+  .card{ position:absolute; top:0; width:var(--card-w); height:var(--card-h); border-radius:12px; background:#3f3f3f; display:grid; place-items:center; font-size:24px; font-weight:800; cursor:pointer; transition:left 0.35s ease, transform 0.35s ease, background .18s ease; box-shadow:0 10px 24px rgba(0,0,0,.35); -webkit-user-select:none; user-select:none; }
+  .card::after{ content:''; position:absolute; inset:-8px; border-radius:16px; pointer-events:none; }
+  .value{ transition:opacity .18s ease; }
+  .face-hidden .value{ opacity:0; text-shadow:0 0 20px #fff; }
+  .correct{ background:#24c76a !important; color:#061b0d; }
+  .wrong{ background:#c1274e !important; color:#fff; }
+  #msg{ min-height:28px; margin-bottom:8px; font-weight:600; font-size:15px; }
+  .controls{ display:flex; gap:10px; justify-content:center; margin-top:8px; flex-wrap:wrap; }
+  label{ font-weight:700; font-size:13px; display:inline-block; margin-right:6px; }
+  select{ padding:8px 10px; border-radius:8px; border:0; font-weight:700; }
+  .small{ font-size:13px; opacity:.95; }
+  .footer-small{ margin-top:12px; font-size:12px; opacity:.8; }
+</style>
+</head>
+<body>
+  <div class="container" id="app">
+    <h1>Tebak Angka</h1>
+
+    <!-- MAIN MENU -->
+    <div id="mainMenu" class="screen active" aria-live="polite">
+      <div class="menu" role="menu" aria-label="Main menu">
+        <button class="btn" id="menuPlay">Play ▶</button>
+        <button class="btn" id="menuMode">Menu Mode</button>
+        <button class="btn" id="menuHelp">Instruksi ❓</button>
+      </div>
+      <div class="footer-small">Tip: tersedia haptic (vibrate) di device yang mendukung.</div>
+    </div>
+
+    <!-- MODE / SETTINGS SCREEN -->
+    <div id="modeScreen" class="screen" aria-live="polite">
+      <div class="stats" style="margin-bottom:12px;">
+        <div class="stat-item small">🏷 Pilih Mode & Timer</div>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <div>
+          <label>Kesulitan:</label>
+          <select id="difficulty">
+            <option value="easy">Mudah (1-50)</option>
+            <option value="hard">Sulit (1-99)</option>
+          </select>
+        </div>
+        <div>
+          <label>Timer:</label>
+          <select id="timeLimitSelect">
+            <option value="0">No timer (Elapsed)</option>
+            <option value="10">10s</option>
+            <option value="20">20s</option>
+            <option value="30">30s</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="controls" style="margin-top:12px;">
+        <button class="btn" id="modeBack">Kembali</button>
+      </div>
+    </div>
+
+    <!-- HELP SCREEN -->
+    <div id="helpScreen" class="screen" aria-live="polite">
+      <div style="text-align:left; margin:0 6px;">
+        <h3>Instruksi Singkat</h3>
+        <ul style="padding-left:18px;">
+          <li>Lihat angka target yang diberikan.</li>
+          <li>Kartu terlihat sebentar, lalu disembunyikan.</li>
+          <li>Kartu akan diacak (pindah posisi) — pilih kartu yang menampung angka target.</li>
+          <li>Pilih mode timer jika mau challenge; waktu habis = kalah.</li>
+        </ul>
+      </div>
+      <div class="controls" style="margin-top:10px;">
+        <button class="btn" id="helpBack">Kembali</button>
+      </div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="gameScreen" class="screen" aria-live="polite">
+      <div class="stats">
+        <div class="stat-item small">⏱ <span id="timeLabel">Waktu</span>: <span id="time">0.0</span>s</div>
+        <div class="stat-item small">🔥 Streak: <span id="streak">0</span></div>
+        <div class="stat-item small">🏆 Top Score: <span id="topscore">0</span></div>
+      </div>
+
+      <div id="target" class="small" aria-live="polite"></div>
+
+      <div class="table" id="table">
+        <div class="card" data-idx="0" role="button" aria-label="Kartu 1"><span class="value"></span></div>
+        <div class="card" data-idx="1" role="button" aria-label="Kartu 2"><span class="value"></span></div>
+        <div class="card" data-idx="2" role="button" aria-label="Kartu 3"><span class="value"></span></div>
+      </div>
+
+      <div id="msg">Tekan <strong>Start</strong> untuk memulai ronde.</div>
+
+      <div class="controls">
+        <button class="btn" id="btnStart">Start</button>
+        <button class="btn" id="btnRetry" style="display:none">Retry</button>
+        <button class="btn" id="btnHome">Home</button>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+/* ---------- helper: haptic/vibrate ---------- */
+function vibratePattern(pattern){
+  try {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  } catch(e){}
+}
+
+/* ---------- elements ---------- */
+const mainMenu = document.getElementById('mainMenu');
+const modeScreen = document.getElementById('modeScreen');
+const helpScreen = document.getElementById('helpScreen');
+const gameScreen = document.getElementById('gameScreen');
+
+const menuPlay = document.getElementById('menuPlay');
+const menuMode = document.getElementById('menuMode');
+const menuHelp = document.getElementById('menuHelp');
+
+const modeBack = document.getElementById('modeBack');
+const helpBack = document.getElementById('helpBack');
+
+const difficultySelect = document.getElementById('difficulty');
+const timeLimitSelectMain = document.getElementById('timeLimitSelect');
+
+const timeEl = document.getElementById('time');
+const timeLabel = document.getElementById('timeLabel');
+const streakEl = document.getElementById('streak');
+const topEl = document.getElementById('topscore');
+const targetEl = document.getElementById('target');
+const msg = document.getElementById('msg');
+
+const btnStart = document.getElementById('btnStart');
+const btnRetry = document.getElementById('btnRetry');
+const btnHome = document.getElementById('btnHome');
+
+const cards = Array.from(document.querySelectorAll('.card'));
+
+/* ---------- state ---------- */
+let cardAtSlot = [...cards];
+let isGuessing = false;
+let targetNumber = 0;
+let hardMode = false;
+let streak = 0;
+let topScore = parseInt(localStorage.getItem('topScore') || '0');
+topEl.textContent = topScore;
+
+let elapsedTimerInt = null;
+let countdownInt = null;
+let startTime = 0;
+let timeLimit = 0;
+let remainingSec = 0;
+
+/* read layout variables */
+const styleValue = (k) => getComputedStyle(document.documentElement).getPropertyValue(k);
+const px = (n) => `${n}px`;
+function getLayout(){
+  const cardW = parseInt(styleValue('--card-w')) || 120;
+  const gap = parseInt(styleValue('--gap')) || 18;
+  return [0, cardW + gap, (cardW + gap) * 2];
+}
+function placeCardsInstant(){ const slots = getLayout(); cardAtSlot.forEach((c,i)=> c.style.left = px(slots[i])); }
+function applyPositionsAnimated(){ const slots = getLayout(); cardAtSlot.forEach((c,i)=> c.style.left = px(slots[i])); }
+
+/* ---------- UI helpers ---------- */
+function showScreen(el){
+  [mainMenu, modeScreen, helpScreen, gameScreen].forEach(s => s.classList.remove('active'));
+  el.classList.add('active');
+}
+function setControlsDisabled(disabled){
+  // disable/enable settings while round
+  menuMode.disabled = disabled;
+  menuPlay.disabled = disabled;
+  menuHelp.disabled = disabled;
+  modeBack.disabled = disabled;
+  difficultySelect.disabled = disabled;
+  timeLimitSelectMain.disabled = disabled;
+  // game controls handled separately
+}
+
+/* ---------- Main menu actions ---------- */
+menuPlay.addEventListener('click', ()=>{
+  vibratePattern(20);
+  // open game screen
+  showScreen(gameScreen);
+  // sync settings from mode screen
+  hardMode = (difficultySelect.value === 'hard');
+  startGameInitialState();
+});
+menuMode.addEventListener('click', ()=>{ vibratePattern(15); showScreen(modeScreen); });
+menuHelp.addEventListener('click', ()=>{ vibratePattern(15); showScreen(helpScreen); });
+
+modeBack.addEventListener('click', ()=>{ vibratePattern(20); showScreen(mainMenu); });
+helpBack.addEventListener('click', ()=>{ vibratePattern(20); showScreen(mainMenu); });
+
+/* ---------- Game flow ---------- */
+function startGameInitialState(){
+  // prepare UI but DO NOT auto-start
+  clearIntervals();
+  timeEl.textContent = '0.0';
+  msg.textContent = 'Tekan Start untuk memulai ronde.';
+  targetEl.textContent = '';
+  btnStart.style.display = 'inline-block';
+  btnRetry.style.display = 'none';
+  // clear cards
+  cards.forEach((c)=>{ c.dataset.value = ''; c.querySelector('.value').textContent = ''; c.classList.remove('face-hidden','correct','wrong'); c.style.pointerEvents = 'none'; });
+  cardAtSlot = [...cards];
+  placeCardsInstant();
+  setControlsDisabled(false);
+}
+
+/* begin a round when user presses Start */
+btnStart.addEventListener('click', ()=>{
+  vibratePattern(10);
+  btnStart.disabled = true;
+  setControlsDisabled(true);
+  // read settings
+  hardMode = (difficultySelect.value === 'hard');
+  timeLimit = parseInt(timeLimitSelectMain.value, 10) || 0;
+  timeLabel.textContent = timeLimit > 0 ? 'Sisa' : 'Waktu';
+  runRound();
+});
+
+/* Retry: appear after a round ends; starts next round immediately */
+btnRetry.addEventListener('click', ()=>{
+  vibratePattern(15);
+  btnRetry.style.display = 'none';
+  btnStart.style.display = 'inline-block';
+  // start new round automatically (press Start)
+  btnStart.disabled = false;
+  btnStart.click();
+});
+
+/* Home button: go back to main menu */
+btnHome.addEventListener('click', ()=>{
+  vibratePattern(20);
+  // stop everything and return to main menu
+  clearIntervals();
+  showScreen(mainMenu);
+  startGameInitialState();
+});
+
+/* runRound: handles one round lifecycle */
+function runRound(){
+  // reset
+  isGuessing = false;
+  msg.textContent = 'Lihat angkanya dulu…';
+  cards.forEach(c => { c.classList.remove('correct','wrong'); c.style.pointerEvents = 'none'; });
+
+  // generate target + other numbers
+  const max = hardMode ? 99 : 50;
+  targetNumber = rand(1, max);
+  targetEl.textContent = `Cari angka: ${targetNumber}`;
+
+  const pool = new Set([targetNumber]);
+  while(pool.size < 3) pool.add(rand(1, max));
+  const values = shuffle([...pool]);
+
+  cards.forEach((card,i)=>{
+    card.dataset.value = values[i];
+    card.querySelector('.value').textContent = values[i];
+  });
+
+  // reset positions & show numbers briefly
+  cardAtSlot = [...cards];
+  placeCardsInstant();
+
+  const exposeMs = parseInt(styleValue('--expose-ms')) || 1200;
+  setTimeout(()=>{
+    cards.forEach(c => c.classList.add('face-hidden'));
+    beginShuffle().then(()=>{
+      // shuffle finished -> player may guess
+      isGuessing = true;
+      msg.textContent = timeLimit > 0 ? 'Tebak sebelum waktu habis!' : 'Sekarang tebak!';
+      cards.forEach(c => c.style.pointerEvents = 'auto');
+      // start timer (countdown or elapsed)
+      if(timeLimit > 0){
+        remainingSec = timeLimit;
+        updateCountdownDisplay();
+        countdownInt = setInterval(countdownStep, 100);
+      } else {
+        startTime = Date.now();
+        elapsedTimerInt = setInterval(updateElapsed, 100);
+      }
+    });
+  }, exposeMs);
+}
+
+/* shuffle logic same as before */
+function beginShuffle(){
+  const steps = parseInt(styleValue('--shuffle-steps')) || 6;
+  const delay = parseInt(styleValue('--shuffle-ms')) || 420;
+  return new Promise((resolve)=>{
+    let remaining = steps;
+    const doStep = ()=>{
+      if(remaining <= 0) return resolve();
+      let a = rand(0,2), b;
+      do { b = rand(0,2); } while(b === a);
+      [cardAtSlot[a], cardAtSlot[b]] = [cardAtSlot[b], cardAtSlot[a]];
+      applyPositionsAnimated();
+      remaining--;
+      setTimeout(doStep, delay);
+    };
+    doStep();
+  });
+}
+
+/* card selection (pointerdown for mobile + mouse) */
+function onCardSelect(e){
+  // ignore if not active or not primary
+  if(!isGuessing) return;
+  if(e.pointerType && e.button && e.button !== 0) return;
+  e.preventDefault();
+
+  // stop timers
+  clearIntervals();
+
+  const card = e.currentTarget;
+  const val = parseInt(card.dataset.value, 10);
+  // reveal all
+  cards.forEach(c=> c.classList.remove('face-hidden'));
+
+  if(val === targetNumber){
+    // correct
+    vibratePattern([8,20,8]); // short pattern
+    streak++;
+    if(streak > topScore){ topScore = streak; localStorage.setItem('topScore', topScore); topEl.textContent = topScore;}
+    msg.textContent = '🎉 Benar! +1 streak.';
+    card.classList.add('correct');
+  } else {
+    // wrong
+    vibratePattern([30,40,30]); // stronger buzz
+    msg.textContent = '❌ Salah! Streak di-reset.';
+    card.classList.add('wrong');
+    streak = 0;
+    const correctCard = cards.find(c => parseInt(c.dataset.value,10) === targetNumber);
+    if(correctCard) correctCard.classList.add('correct');
+  }
+  streakEl.textContent = streak;
+  // disable further picks
+  cards.forEach(c => c.style.pointerEvents = 'none');
+  isGuessing = false;
+
+  // show retry & home; hide start
+  btnRetry.style.display = 'inline-block';
+  btnStart.style.display = 'none';
+  btnStart.disabled = false;
+  setControlsDisabled(false);
+}
+
+/* attach pointerdown (touch friendly) */
+cards.forEach(c=>{
+  c.addEventListener('pointerdown', onCardSelect);
+  c.addEventListener('contextmenu', ev => ev.preventDefault());
+});
+
+/* timers */
+function countdownStep(){
+  if(remainingSec <= 0){ handleTimeOut(); return; }
+  remainingSec -= 0.1;
+  if(remainingSec <= 0){ remainingSec = 0; updateCountdownDisplay(); handleTimeOut(); }
+  else updateCountdownDisplay();
+}
+function updateCountdownDisplay(){ timeEl.textContent = Math.max(0,remainingSec).toFixed(1); }
+
+function handleTimeOut(){
+  clearIntervals();
+  // reveal and mark correct
+  cards.forEach(c=> c.classList.remove('face-hidden'));
+  const correctCard = cards.find(c => parseInt(c.dataset.value,10) === targetNumber);
+  if(correctCard) correctCard.classList.add('correct');
+
+  vibratePattern([60,80,60]);
+  msg.textContent = '⏳ Waktu habis! Streak di-reset.';
+  streak = 0; streakEl.textContent = streak;
+  cards.forEach(c => c.style.pointerEvents = 'none');
+  isGuessing = false;
+
+  // show retry/home
+  btnRetry.style.display = 'inline-block';
+  btnStart.style.display = 'none';
+  setControlsDisabled(false);
+}
+
+function updateElapsed(){ const elapsed = (Date.now() - startTime)/1000; timeEl.textContent = elapsed.toFixed(1); }
+
+function clearIntervals(){
+  clearInterval(countdownInt); countdownInt = null;
+  clearInterval(elapsedTimerInt); elapsedTimerInt = null;
+}
+
+/* helpers */
+function rand(min,max){ return Math.floor(Math.random() * (max - min + 1)) + min; }
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]] } return arr; }
+
+/* initial UI setup */
+function init(){
+  // default screen
+  showScreen(mainMenu);
+  // init gameScreen UI
+  timeEl.textContent = '0.0';
+  streakEl.textContent = streak;
+  topEl.textContent = topScore;
+  placeCardsInstant();
+  // Start / Retry visibility initial
+  btnStart.style.display = 'inline-block';
+  btnRetry.style.display = 'none';
+  // ensure settings read
+  difficultySelect.value = 'easy';
+  timeLimitSelectMain.value = '0';
+}
+init();
+
+/* reposition on resize/orientation */
+window.addEventListener('resize', placeCardsInstant);
+window.addEventListener('orientationchange', ()=> setTimeout(placeCardsInstant, 120));
+</script>
+</body>
+</html>
